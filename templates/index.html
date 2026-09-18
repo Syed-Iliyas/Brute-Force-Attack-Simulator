@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brute Force Attack Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="masthead-left">
+      <span class="kicker">SHA-256 // EXHAUSTIVE KEY SEARCH</span>
+      <h1>Brute Force Attack Simulator</h1>
+      <p class="dek">Hash your own password and watch an exhaustive search try every combination over the
+        full alphabet &mdash; lowercase, uppercase, digits, and symbols &mdash; until it lands on a match.
+        A live demonstration of why password length matters more than almost anything else.</p>
+    </div>
+    <div class="masthead-right">
+      <div class="status-chip" id="status-chip" data-state="idle">
+        <span class="status-dot"></span>
+        <span id="status-chip-label">IDLE</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <!-- ============ CONFIG PANEL ============ -->
+    <section class="panel config-panel" id="config-panel">
+      <h2 class="panel-title">01 &nbsp;Configure target</h2>
+
+      <div class="field">
+        <label for="username">Username</label>
+        <input type="text" id="username" autocomplete="off" placeholder="e.g. alice">
+        <p class="field-hint">Shown alongside results for context only &mdash; it is not hashed and does
+          not affect the attack in any way.</p>
+      </div>
+
+      <div class="field">
+        <label for="password">Password to attack</label>
+        <input type="text" id="password" autocomplete="off" placeholder="e.g. correcthorse"
+               minlength="{{ min_allowed_length }}" maxlength="{{ max_allowed_length }}">
+        <p class="field-hint">Hashed locally and used only inside this simulation. Must be
+          {{ min_allowed_length }}&ndash;{{ max_allowed_length }} characters. The search always covers the
+          full alphabet ({{ charset_size }} characters: a&ndash;z, A&ndash;Z, 0&ndash;9, and symbols)
+          regardless of what your password actually contains &mdash; a real attacker wouldn't know your
+          composition in advance either.</p>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Password length (auto)</label>
+          <div class="derived-length" id="derived-length">0 characters</div>
+          <p class="field-hint">Taken directly from the password above &mdash; type more or fewer
+            characters to change the search length.</p>
+        </div>
+        <div class="field">
+          <label for="gps">Simulated guesses / second: <span id="gps_val">300</span></label>
+          <input type="range" id="gps" min="1" max="1000000" value="300" step="1">
+          <label class="max-speed-toggle">
+            <input type="checkbox" id="max-speed-toggle">
+            <span>MAX speed &mdash; unthrottled, all {{ cpu_count }} CPU core{{ 's' if cpu_count != 1 else '' }} on this machine, real measured rate</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="field">
+        <p class="field-hint" id="search-space-preview">Search space: &mdash;</p>
+      </div>
+
+      <div class="time-warning" id="time-warning" hidden>
+        <span class="time-warning-icon">!</span>
+        <span id="time-warning-text"></span>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary" id="start-btn">Launch attack</button>
+        <button class="btn btn-ghost" id="stop-btn" disabled>Stop</button>
+      </div>
+
+      <p class="error-msg" id="error-msg"></p>
+    </section>
+
+    <!-- ============ LIVE READOUT ============ -->
+    <section class="panel readout-panel">
+      <h2 class="panel-title">02 &nbsp;Live readout</h2>
+
+      <div class="hash-row">
+        <div class="hash-row-item">
+          <span class="hash-label">TARGET USERNAME</span>
+          <code class="hash-value" id="target-username">&mdash;</code>
+        </div>
+        <div class="hash-row-item">
+          <span class="hash-label">TARGET HASH (SHA-256)</span>
+          <code class="hash-value" id="target-hash">&mdash;</code>
+        </div>
+      </div>
+
+      <div class="progress-block">
+        <div class="progress-meta">
+          <span id="progress-current-label">Trying length 1</span>
+          <span id="progress-percent">0%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+        </div>
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat">
+          <span class="stat-label">Attempts</span>
+          <span class="stat-value" id="stat-attempts">0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Elapsed</span>
+          <span class="stat-value" id="stat-elapsed">0.0s</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Measured rate</span>
+          <span class="stat-value" id="stat-measured-rate">&mdash;</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Current guess</span>
+          <span class="stat-value mono-small" id="stat-current-guess">&mdash;</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Search space</span>
+          <span class="stat-value" id="stat-search-space">&mdash;</span>
+        </div>
+      </div>
+
+      <div class="result-banner" id="result-banner" hidden>
+        <div class="result-banner-inner">
+          <span class="result-title" id="result-title">&nbsp;</span>
+          <div class="result-details" id="result-details"></div>
+        </div>
+      </div>
+
+      <div class="charts-block" id="charts-block" hidden>
+        <h3 class="charts-heading">Attempts over time</h3>
+        <svg class="chart-svg" id="chart-timeline" viewBox="0 0 600 180" preserveAspectRatio="none"></svg>
+
+        <h3 class="charts-heading">Guesses tried per length</h3>
+        <svg class="chart-svg" id="chart-lengths" viewBox="0 0 600 180" preserveAspectRatio="none"></svg>
+      </div>
+    </section>
+
+    <!-- ============ GUESS LEDGER ============ -->
+    <section class="panel ledger-panel">
+      <h2 class="panel-title">03 &nbsp;Guess ledger</h2>
+      <div class="ledger-head">
+        <span class="col-n">#</span>
+        <span class="col-guess">guess</span>
+        <span class="col-hash">sha256(guess)</span>
+        <span class="col-match">match</span>
+      </div>
+      <div class="ledger-body" id="ledger-body">
+        <div class="ledger-empty" id="ledger-empty">Launch an attack to see live guesses stream in here.</div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="page-footer">
+    Educational simulation only &mdash; runs entirely against a password you provide in this session.
+    Passwords are {{ min_allowed_length }}&ndash;{{ max_allowed_length }} characters, searched over the
+    full {{ charset_size }}-character alphabet. Short passwords crack in moments even so &mdash; toward
+    the upper end of that range the search space becomes enormous and most runs won't finish on their
+    own, which is itself the point of the demonstration.
+  </footer>
+
+</div>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
